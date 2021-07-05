@@ -178,6 +178,27 @@ Resources:
           - LambdaFuncNameArn: !GetAtt lambdaFunction.Arn
     DependsOn:
       - APIGatewayResource
+      
+  APIGatewayMethod2:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: GET
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFuncNameArn}/invocations
+          - LambdaFuncNameArn: !GetAtt lambdaFunction.Arn
+    DependsOn:
+      - APIGatewayResource
 
   APIGatewayDeployment:
     Type: "AWS::ApiGateway::Deployment"
@@ -187,6 +208,7 @@ Resources:
         Ref: EnvironmentType
     DependsOn:
       - APIGatewayMethod
+      - APIGatewayMethod2
 
   APIGatewayPermission:
     Type: "AWS::Lambda::Permission"
@@ -234,3 +256,10 @@ Resources:
                   - "logs:CreateLogGroup"
                   - "logs:PutLogEvents"
                 Resource: "*"
+
+Outputs:
+  postapi:
+    Description: post api url
+    Value: !Ref APIGatewayDeployment
+    Export:
+      Name: api
