@@ -1,0 +1,236 @@
+Parameters:
+  Lambdafunctionname:
+    Description: Name for lambda function
+    Type: String
+    Default: Lambdafunction
+
+  DDBname:
+    Description: DynamoDB table Name
+    Type: String
+    Default: ddbtable
+
+  Apiname:
+    Type: String
+    Default: api-lambda-ddb
+
+  EnvironmentType:
+    Description: Type of environment
+    Type: String
+    Default: prod
+    AllowedValues:
+      - dev
+      - prod
+
+Resources:
+  lambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Ref Lambdafunctionname
+      Handler: index.handler
+      MemorySize: 128
+      Role: !GetAtt IAMRole.Arn
+      Runtime: nodejs12.x
+      Code:
+        ZipFile: |
+          const AWS = require('aws-sdk');
+          const docClient = new AWS.DynamoDB.DocumentClient({region: "us-east-1"});
+          exports.handler = (event, context, callback) => {
+          console.log("Processing...");
+          const params = {
+          Item: {
+              Id: event.key1,
+              Product:event.key2,
+              Quantity:event.key3,
+              Location:event.key4,
+              Image:event.key5
+          },
+          TableName: "Producttab"
+          };
+          const response = {
+          statusCode: 200,
+          headers: {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Credentials': true,
+          },
+          body: JSON.stringify('Hello from new Lambda!'),
+          };
+          docClient.put(params, function(err, data) {
+          if(err){
+            callback(err, null);
+          } else {
+            callback(null, data);
+          }
+          })
+          };
+    DependsOn:
+      - DynamoDBTable
+
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref DDBname
+
+      ProvisionedThroughput:
+        ReadCapacityUnits: "5"
+        WriteCapacityUnits: "5"
+
+      AttributeDefinitions:
+        - AttributeName: Id
+          AttributeType: "N"
+
+        - AttributeName: Product
+          AttributeType: S
+
+        - AttributeName: Quantity
+          AttributeType: "N"
+
+        - AttributeName: Location
+          AttributeType: S
+
+        - AttributeName: Image
+          AttributeType: S
+
+      KeySchema:
+        - AttributeName: Id
+          KeyType: HASH
+
+      GlobalSecondaryIndexes:
+        - IndexName: Index1
+          KeySchema:
+            - AttributeName: Product
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+
+        - IndexName: Index2
+          KeySchema:
+            - AttributeName: Quantity
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+
+        - IndexName: Index3
+          KeySchema:
+            - AttributeName: Location
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+
+        - IndexName: Index4
+          KeySchema:
+            - AttributeName: Image
+              KeyType: HASH
+          Projection:
+            ProjectionType: KEYS_ONLY
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+
+    DependsOn:
+      - IAMRole
+
+  APIGatewayRestAPI:
+    Type: "AWS::ApiGateway::RestApi"
+    Properties:
+      Name:
+        Ref: Apiname
+    DependsOn:
+      - lambdaFunction
+
+  APIGatewayResource:
+    Type: "AWS::ApiGateway::Resource"
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ParentId: !GetAtt
+        - APIGatewayRestAPI
+        - RootResourceId
+      PathPart:
+        Ref: Lambdafunctionname
+    DependsOn:
+      - APIGatewayRestAPI
+
+  APIGatewayMethod:
+    Type: "AWS::ApiGateway::Method"
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      ResourceId: !Ref APIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFuncNameArn}/invocations
+          - LambdaFuncNameArn: !GetAtt lambdaFunction.Arn
+    DependsOn:
+      - APIGatewayResource
+
+  APIGatewayDeployment:
+    Type: "AWS::ApiGateway::Deployment"
+    Properties:
+      RestApiId: !Ref APIGatewayRestAPI
+      StageName:
+        Ref: EnvironmentType
+    DependsOn:
+      - APIGatewayMethod
+
+  APIGatewayPermission:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !GetAtt lambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+    DependsOn:
+      - APIGatewayDeployment
+
+  IAMRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - "sts:AssumeRole"
+      Path: /
+      Policies:
+        - PolicyName: Policy_api-lambda-db
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - "dynamodb:BatchGetItem"
+                  - "dynamodb:BatchWriteItem"
+                  - "dynamodb:TagResource"
+                  - "dynamodb:UntagResource"
+                  - "dynamodb:PutItem"
+                  - "dynamodb:DeleteItem"
+                  - "dynamodb:GetItem"
+                  - "dynamodb:Scan"
+                  - "dynamodb:Query"
+                  - "dynamodb:UpdateItem"
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogStream"
+                  - "logs:CreateLogGroup"
+                  - "logs:PutLogEvents"
+                Resource: "*"
